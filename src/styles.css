@@ -1233,3 +1233,87 @@ footer {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* Candidate analysis uses the normal play composition; only the contents of
+   the right panel change. */
+@media (min-width: 1200px) {
+  .is-comparing-page {
+    display: block;
+    width: auto;
+    height: auto;
+    max-width: 120rem;
+    overflow: visible;
+    padding: 1rem 1.3rem 2rem;
+  }
+
+  .is-comparing-page .game-header {
+    min-height: 0;
+  }
+
+  .is-comparing-page .game-header h1 {
+    margin-bottom: 0.8rem;
+    font-size: revert;
+  }
+
+  .is-comparing-page .eyebrow {
+    display: block;
+  }
+
+  .is-comparing-page .score-strip {
+    gap: 0.5rem;
+    margin: 1rem 0;
+  }
+
+  .is-comparing-page .score-strip article {
+    display: grid;
+    grid-template-columns: none;
+    justify-content: initial;
+    gap: 0.15rem;
+    padding: 0.65rem 0.8rem;
+  }
+
+  .is-comparing-page .game-layout {
+    flex: none;
+    min-height: 0;
+  }
+
+  .game-layout.is-comparing {
+    grid-template-columns: minmax(32rem, 1fr) minmax(20rem, 26rem);
+    gap: 1.4rem;
+  }
+
+  .is-comparing .board-panel,
+  .is-comparing .control-panel {
+    min-height: 0;
+    padding: 1rem;
+    border-radius: 1rem;
+  }
+
+  .is-comparing .board-panel {
+    display: block;
+    overflow: visible;
+  }
+
+  .is-comparing .board-shell {
+    width: min(100%, 49rem);
+  }
+
+  .is-comparing .control-panel {
+    gap: 1.2rem;
+    overflow: visible;
+  }
+
+  .is-comparing .hand {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.55rem;
+  }
+
+  .is-comparing .hand-card {
+    min-height: 4.7rem;
+    padding: 0.7rem;
+  }
+
+  .is-comparing .hand-card strong {
+    font-size: 2rem;
+  }
+}
