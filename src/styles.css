@@ -676,6 +676,15 @@ label {
   gap: 0.65rem;
 }
 
+.score-strip article .last-turn {
+  min-height: 2.2em;
+  margin-top: 0.25rem;
+  padding-top: 0.35rem;
+  border-top: 1px solid var(--line);
+  color: #e7dccb;
+  line-height: 1.35;
+}
+
 .comparison-cards-vertical {
   display: flex;
   flex-direction: column;
@@ -714,6 +723,7 @@ label {
   gap: 0.35rem;
   margin-top: 0.2rem;
   font-size: 0.78rem;
+  white-space: normal;
 }
 
 .candidate-bonus {

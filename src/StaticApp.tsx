@@ -81,6 +81,16 @@ const planText = (start: GameState, actions: Action[]): string => {
 
 const roundedProbability = (value: number): string => `${Math.round(value * 100)}%`;
 
+const waitForAnimation = (milliseconds: number): Promise<void> =>
+  new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
+const turnSummaryText = (turn: V2TrackingState["history"][number] | undefined): string => {
+  if (!turn) return "直近 なし / 受取失点 0枚";
+  const colors = { red: "赤", blue: "青", green: "緑", yellow: "黄" } as const;
+  const cards = turn.cards.map((card) => `${colors[card.color]}${card.rankIndex + 1}`).join("・");
+  return `直近 ${cards || "なし"} / 受取失点 ${turn.negativeCardDelta}枚`;
+};
+
 export default function StaticApp() {
   const [state, setState] = useState<GameState>(() => newGame());
   const [history, setHistory] = useState<RecentPlacement[]>([]);
@@ -165,9 +175,17 @@ export default function StaticApp() {
           if (nextState.phase === "play" && nextState.cardsPlayedThisTurn === 0 && legalActions(nextState).some((action) => action.type === "place")) {
             const candidates = enumerateTurnCandidates(nextState, nextHistory);
             const best = await selectBestTurn(candidates, player, nextState, nextTracking, nextHistory, MODEL_ID);
-            nextTracking = replayV2Actions(nextState, best.candidate.actions, nextTracking).tracking;
-            nextState = best.candidate.state;
-            nextHistory = best.candidate.history;
+            for (const action of best.candidate.actions) {
+              if (token !== generation.current) return;
+              const applied = applyActionTrackingHistory(nextState, action, nextHistory);
+              nextTracking = observeV2Action(nextTracking, nextState, action, applied.state);
+              nextState = applied.state;
+              nextHistory = applied.history;
+              setState(nextState);
+              setHistory(nextHistory);
+              setTracking(nextTracking);
+              await waitForAnimation(220);
+            }
           } else {
             const action = chooseHeuristicAction(nextState);
             if (!action) throw new Error("CPUが合法手を選べませんでした。");
@@ -175,6 +193,10 @@ export default function StaticApp() {
             nextTracking = observeV2Action(nextTracking, nextState, action, applied.state);
             nextState = applied.state;
             nextHistory = applied.history;
+            setState(nextState);
+            setHistory(nextHistory);
+            setTracking(nextTracking);
+            await waitForAnimation(220);
           }
         }
         if (token !== generation.current) return;
@@ -317,7 +339,7 @@ export default function StaticApp() {
           <button type="button" className="text-button" onClick={reset}>リセット</button>
         </div>
       </header>
-      <section className="score-strip">{state.players.map((player, index) => <article key={index} className={state.currentPlayerIndex === index ? "active-player" : ""}><strong>{index === 0 ? "あなた" : `NPC ${index}`}</strong><span>失点 {player.lossScore}</span><span>手札 {player.hand.length}</span><span>マイナス {player.negativeCards.length}</span></article>)}</section>
+      <section className="score-strip">{state.players.map((player, index) => <article key={index} className={state.currentPlayerIndex === index ? "active-player" : ""}><strong>{index === 0 ? "あなた" : `NPC ${index}`}</strong><span>失点 {player.lossScore}</span><span>手札 {player.hand.length}</span><span>マイナス {player.negativeCards.length}</span><span className="last-turn">{turnSummaryText([...tracking.history].reverse().find((turn) => turn.playerIndex === index))}</span></article>)}</section>
       {message && <p className="notice">{message}</p>}
       {error && <section className="notice model-error"><strong>モデルエラー</strong><p>{error}</p><button type="button" className="primary" onClick={reset}>リセットして再試行</button></section>}
       {state.phase === "game_over" ? <section className="game-over"><p className="eyebrow">GAME OVER</p><h2>{state.winners.includes(0) ? "あなたの勝利です" : `NPC ${state.winners.join(", ")} の勝利です`}</h2><button type="button" className="primary" onClick={reset}>もう一度遊ぶ</button><button type="button" onClick={reset}>リセット</button></section> : <div className={`game-layout${comparison ? " is-comparing" : ""}`}>
@@ -328,7 +350,7 @@ export default function StaticApp() {
           {isHumanTurn && humanRefills.length > 0 && <section><h2>手札を補充</h2><p>補充方法を選んでください。</p>{humanRefills.map((action) => <button type="button" key={action.source} onClick={() => applyActualAction(action)}>{action.source === "deck" ? "山札から補充" : action.source === "negative_cards" ? "マイナスカードから補充" : "補充しない"}</button>)}</section>}
           {isHumanTurn && !humanRefills.length && <section><div className="section-title"><h2>あなたの手</h2><span>{pendingActions.length}/2枚</span></div><div className="frame-mode"><span>3×3枠を自動設定</span><button type="button" className={manualFrameSelection ? "selected" : ""} aria-pressed={manualFrameSelection} onClick={() => { setManualFrameSelection((value) => !value); setFrameChoices([]); setSelectedFrameAction(null); }}>{manualFrameSelection ? "OFF" : "ON"}</button></div><Hand cards={shownHand} selectedIndex={selectedHand} disabled={Boolean(comparison) || thinking || frameChoices.length > 0} onSelect={(index) => { setSelectedHand(index); setFrameChoices([]); setSelectedFrameAction(null); }} />
             <div className="frame-mode win-rate-toggle"><span>勝率計算</span><button type="button" className={winRateEnabled ? "selected" : ""} aria-pressed={winRateEnabled} onClick={() => { setWinRateEnabled((value) => !value); setComparison(null); }}>{winRateEnabled ? "ON" : "OFF"}</button></div>
-            {comparison && <section className="comparison comparison-under-hand"><div className="comparison-heading"><h2>AI上位3候補</h2><span>候補を選ぶと盤面と失点表示をプレビューします。</span></div><div className="comparison-cards comparison-cards-vertical"><button type="button" className={preview === "own" ? "selected" : ""} onClick={() => setPreview("own")}><span>あなたの手</span><strong>{previewModel?.own ? roundedProbability(previewModel.own.probability) : "-"}</strong><small>{previewModel?.own && planText(state, previewModel.own.candidate.actions)}</small></button>{previewModel?.top.slice(0, 3).map((value, index) => { const own = previewModel.own; const sameCards = own ? playedCardsSignature(state, value.candidate.actions) === playedCardsSignature(state, own.candidate.actions) : false; const sameRefill = own ? candidateRefillDecision(value.candidate.actions) === candidateRefillDecision(own.candidate.actions) : false; const before = state.players[0]; const after = value.candidate.state.players[0]; const bonus = Math.max(0, before.lossScore - after.lossScore); const penalty = Math.max(0, after.negativeCards.length - before.negativeCards.length); return <button type="button" key={index} className={preview === `ai-${index}` ? "selected" : ""} onClick={() => setPreview(`ai-${index}` as "ai-0" | "ai-1" | "ai-2")}><span>AI {index + 1}位</span><strong>{roundedProbability(value.probability)}</strong><small>{planText(state, value.candidate.actions)}</small>{(bonus !== 0 || penalty !== 0) && <span className="candidate-effects">{bonus !== 0 && <b className="candidate-bonus">+{bonus}</b>}{penalty !== 0 && <b className="candidate-penalty">-{penalty}</b>}</span>}{sameCards && <b className="same-cards">{sameRefill ? "同じカード" : "同じカード・補充違い"}</b>}</button>; })}</div></section>}
+            {comparison && <section className="comparison comparison-under-hand"><div className="comparison-heading"><h2>AI上位3候補</h2><span>候補を選ぶと盤面と失点表示をプレビューします。</span></div><div className="comparison-cards comparison-cards-vertical"><button type="button" className={preview === "own" ? "selected" : ""} onClick={() => setPreview("own")}><span>あなたの手</span><strong>{previewModel?.own ? roundedProbability(previewModel.own.probability) : "-"}</strong><small>{previewModel?.own && planText(state, previewModel.own.candidate.actions)}</small></button>{previewModel?.top.slice(0, 3).map((value, index) => { const own = previewModel.own; const sameCards = own ? playedCardsSignature(state, value.candidate.actions) === playedCardsSignature(state, own.candidate.actions) : false; const sameRefill = own ? candidateRefillDecision(value.candidate.actions) === candidateRefillDecision(own.candidate.actions) : false; const before = state.players[0]; const after = value.candidate.state.players[0]; const bonus = Math.max(0, before.lossScore - after.lossScore); const penalty = Math.max(0, after.negativeCards.length - before.negativeCards.length); return <button type="button" key={index} className={preview === `ai-${index}` ? "selected" : ""} onClick={() => setPreview(`ai-${index}` as "ai-0" | "ai-1" | "ai-2")}><span>AI {index + 1}位</span><strong>{roundedProbability(value.probability)}</strong><small>{planText(state, value.candidate.actions)}</small>{(bonus !== 0 || penalty !== 0) && <span className="candidate-effects">{bonus !== 0 && <b className="candidate-bonus">ボーナス +{bonus}</b>}{penalty !== 0 && <b className="candidate-penalty">失点カード -{penalty}</b>}</span>}{sameCards && <b className="same-cards">{sameRefill ? "同じカード" : "同じカード・補充違い"}</b>}</button>; })}</div></section>}
             {selectedHand !== null && !frameChoices.length && <p className="hint">盤面の置き場所を選んでください。</p>}{frameChoices.length > 0 && <div className="frame-picker"><strong>3×3枠を選択</strong><p>{selectedFrameAction ? `枠外のカード ${penaltyCardCount}枚が失点カードになります。盤面のハイライトを確認してください。` : "盤面上の枠候補を選んでください。"}</p><button type="button" className="primary" onClick={() => selectedFrameAction && commitPlacement(selectedFrameAction)} disabled={!selectedFrameAction}>OK</button></div>}{plannedRefillOptions.length > 0 && pendingActions.length > 0 && <section className="planned-refill"><h2>補充方法</h2>{plannedRefillOptions.map((action) => <button type="button" key={action.source} className={plannedRefill?.source === action.source ? "selected" : ""} onClick={() => setPlannedRefill(action)}>{action.source === "deck" ? "山札から補充" : action.source === "negative_cards" ? "マイナスから補充" : "補充しない"}</button>)}</section>}{canCompletePendingMove && !comparison && <button type="button" className="primary" onClick={completeMove} disabled={thinking}>{pendingActions.length === 1 ? "1枚で手番を終了" : "この2枚でプレイ"}</button>}{comparison && previewModel?.own && <button type="button" className="primary" onClick={() => commitCandidate(preview === "own" ? previewModel.own : previewModel.top[Number(preview.slice(3))])}>表示中の手でプレイ</button>}{pendingActions.length > 0 && <button type="button" onClick={resetTurnUi}>自分の手を選び直す</button>}</section>}
         </aside>
       </div>}
