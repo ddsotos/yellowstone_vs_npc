@@ -220,11 +220,14 @@ export default function StaticApp() {
 
   useEffect(() => {
     if (previousAutoPlay.current === autoPlay) return;
+    const wasAutoPlaying = previousAutoPlay.current;
     previousAutoPlay.current = autoPlay;
-    generation.current += 1;
-    running.current = false;
-    setThinking(false);
-    if (!autoPlay) setMessage("AIに任せるを停止しました。");
+    if (wasAutoPlaying && !autoPlay) {
+      generation.current += 1;
+      running.current = false;
+      setThinking(false);
+      setMessage("AIに任せるを停止しました。");
+    }
   }, [autoPlay]);
 
   const commitPlacement = (action: PlaceCardAction) => {
