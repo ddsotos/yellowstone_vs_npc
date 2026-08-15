@@ -18,14 +18,14 @@ function translate(root: Node) {
     if (value !== node.nodeValue) node.nodeValue = value;
   });
   document.querySelectorAll(".card-color").forEach((element) => {
-    const colors: Record<string, string> = { "青": "Blue", "赤": "Red", "緑": "Green", "黄": "Yellow" };
+    const colors: Record<string, string> = { "青": "B", "赤": "R", "緑": "G", "黄": "Y" };
     const translated = colors[element.textContent?.trim() ?? ""];
     if (translated) element.textContent = translated;
   });
   document.querySelectorAll(".last-turn").forEach((element) => {
     let value = element.textContent ?? "";
     if (value.includes("直近")) value = value.replace("直近 なし / 受取Penalty 0枚", "No recent action / Penalty received: 0 cards");
-    value = value.replace("直近 ", "Recent: ").replaceAll("青", "Blue").replaceAll("赤", "Red").replaceAll("緑", "Green").replaceAll("黄", "Yellow").replaceAll("・", ", ").replace(" / 受取Penalty ", " / Penalty received: ").replaceAll("枚", " cards");
+    value = value.replace("直近 ", "Recent: ").replaceAll("青", "B").replaceAll("赤", "R").replaceAll("緑", "G").replaceAll("黄", "Y").replaceAll("・", ", ").replace(" / 受取Penalty ", " / Penalty received: ").replaceAll("枚", " cards");
     value = value.replace(/Penalty received: (\d+) cards/, (_match, count: string) => `Penalty received: ${count} ${count === "1" ? "card" : "cards"}`);
     if (value !== element.textContent) element.textContent = value;
   });
