@@ -37,6 +37,11 @@ function translate(root: Node) {
       if (nodeValue !== node.nodeValue) node.nodeValue = nodeValue;
     });
   });
+  document.querySelectorAll(".comparison-cards small").forEach((element) => {
+    let value = element.textContent ?? "";
+    [["青", "B"], ["赤", "R"], ["緑", "G"], ["黄", "Y"], ["手番終了", "End turn"], ["山札から補充", "Draw from deck"], ["補充しない", "Draw no cards"], ["マイナスから補充", "Draw from penalties"]].forEach(([from, to]) => { value = value.split(from).join(to); });
+    if (value !== element.textContent) element.textContent = value;
+  });
   document.querySelectorAll(".last-turn").forEach((element) => {
     let value = element.textContent ?? "";
     if (value.includes("直近")) value = value.replace("直近 なし / 受取Penalty 0枚", "No recent action / Penalty received: 0 cards");
