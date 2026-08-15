@@ -1323,7 +1323,168 @@ footer {
     padding: 0.7rem;
   }
 
-  .is-comparing .hand-card strong {
+.is-comparing .hand-card strong {
     font-size: 2rem;
+  }
+}
+
+.tutorial-page {
+  width: min(100%, 78rem);
+  margin: 0 auto;
+  padding: 2rem 1.4rem 4rem;
+  color: var(--ink, #20251f);
+}
+
+.tutorial-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  margin-bottom: 2rem;
+}
+
+.tutorial-header h1 {
+  margin: 0.25rem 0 0.8rem;
+}
+
+.tutorial-lead {
+  max-width: 42rem;
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.tutorial-back,
+.tutorial-bottom-back {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.tutorial-section {
+  margin: 1.4rem 0;
+  padding: clamp(1.2rem, 3vw, 2.2rem);
+  border: 1px solid rgba(61, 79, 54, 0.16);
+  border-radius: 1.2rem;
+  background: rgba(255, 253, 246, 0.86);
+  box-shadow: 0 0.8rem 2rem rgba(35, 45, 30, 0.06);
+}
+
+.tutorial-section h2 {
+  margin: 0.25rem 0 0.8rem;
+}
+
+.tutorial-section h3 {
+  margin: 0 0 0.35rem;
+  font-size: 1.05rem;
+}
+
+.tutorial-section p {
+  max-width: 62rem;
+  line-height: 1.75;
+}
+
+.tutorial-hero,
+.tutorial-section-split {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(18rem, 0.92fr);
+  gap: clamp(1.2rem, 4vw, 3rem);
+  align-items: center;
+}
+
+.tutorial-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.tutorial-rule {
+  display: flex;
+  gap: 0.8rem;
+  padding: 1rem;
+  border-radius: 0.9rem;
+  background: rgba(235, 239, 223, 0.72);
+}
+
+.tutorial-rule > span {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  flex: 0 0 2rem;
+  border-radius: 50%;
+  background: #536c44;
+  color: #fffdf6;
+  font-weight: 700;
+}
+
+.tutorial-rule p {
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.6;
+}
+
+.tutorial-figure {
+  margin: 0;
+}
+
+.tutorial-figure img {
+  display: block;
+  width: 100%;
+  max-height: 34rem;
+  object-fit: cover;
+  object-position: top;
+  border: 1px solid rgba(61, 79, 54, 0.24);
+  border-radius: 0.85rem;
+  background: #e9eadf;
+  box-shadow: 0 0.6rem 1.5rem rgba(35, 45, 30, 0.12);
+}
+
+.tutorial-figure figcaption {
+  margin-top: 0.55rem;
+  color: #5c6658;
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+
+.tutorial-note {
+  display: flex;
+  gap: 0.8rem;
+  align-items: baseline;
+  margin-top: 1rem;
+  padding: 1rem 1.1rem;
+  border-left: 0.3rem solid #c2933e;
+  background: #f6edd9;
+}
+
+.tutorial-note span {
+  line-height: 1.65;
+}
+
+.tutorial-scope {
+  background: rgba(232, 238, 224, 0.75);
+}
+
+.tutorial-bottom-back {
+  display: block;
+  margin: 2rem auto 0;
+}
+
+@media (max-width: 760px) {
+  .tutorial-header,
+  .tutorial-hero,
+  .tutorial-section-split {
+    display: block;
+  }
+
+  .tutorial-header .tutorial-back {
+    margin-top: 1rem;
+  }
+
+  .tutorial-hero .tutorial-figure,
+  .tutorial-section-split .tutorial-figure {
+    margin-top: 1.2rem;
+  }
+
+  .tutorial-grid {
+    grid-template-columns: 1fr;
   }
 }

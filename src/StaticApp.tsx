@@ -39,6 +39,7 @@ import {
   V2TrackingState,
 } from "./game/v2Tracking";
 import { MODEL_ID, MODEL_LABEL, verifyModelContract } from "./modelContract";
+import Tutorial from "./Tutorial";
 
 const newGame = (): GameState => {
   const state = createInitialState(4);
@@ -92,6 +93,7 @@ const turnSummaryText = (turn: V2TrackingState["history"][number] | undefined): 
 };
 
 export default function StaticApp() {
+  const [screen, setScreen] = useState<"game" | "tutorial">("game");
   const [state, setState] = useState<GameState>(() => newGame());
   const [history, setHistory] = useState<RecentPlacement[]>([]);
   const [tracking, setTracking] = useState<V2TrackingState>(() => createV2Tracking(4));
@@ -146,6 +148,13 @@ export default function StaticApp() {
     setMessage("新しいゲームを開始しました。");
   }, [resetTurnUi]);
 
+  const openTutorial = useCallback(() => {
+    generation.current += 1;
+    running.current = false;
+    setThinking(false);
+    setScreen("tutorial");
+  }, []);
+
   useEffect(() => {
     try {
       verifyModelContract();
@@ -157,7 +166,7 @@ export default function StaticApp() {
   }, []);
 
   useEffect(() => {
-    if (state.phase === "game_over" || running.current || error || (!autoPlay && state.currentPlayerIndex === 0)) return;
+    if (screen === "tutorial" || state.phase === "game_over" || running.current || error || (!autoPlay && state.currentPlayerIndex === 0)) return;
     running.current = true;
     const token = generation.current;
     let nextState = state;
@@ -216,7 +225,7 @@ export default function StaticApp() {
       }
     };
     void run();
-  }, [state, history, tracking, autoPlay, error]);
+  }, [state, history, tracking, autoPlay, error, screen]);
 
   useEffect(() => {
     if (previousAutoPlay.current === autoPlay) return;
@@ -342,12 +351,15 @@ export default function StaticApp() {
   const penaltyCardCount = [...penaltyPositionKeys].reduce((total, key) => total + (placementPreviewBoard[key]?.length ?? 0), 0);
   const shownHand = shownEvaluation ? handBeforeRefill(state, shownEvaluation.candidate.actions) : pending.players[0].hand;
 
+  if (screen === "tutorial") return <Tutorial onBack={() => setScreen("game")} />;
+
   return (
     <main className={`game-page${comparison ? " is-comparing-page" : ""}`}>
       <header className="game-header">
         <div><p className="eyebrow">4 PLAYER GAME</p><h1>Yellowstone park</h1></div>
         <div className="header-actions">
           <span>CPU 3体</span><span>{MODEL_LABEL}</span>
+          <button type="button" className="text-button" onClick={openTutorial}>遊び方</button>
           <button type="button" className="text-button" onClick={() => setAutoPlay((value) => !value)}>{autoPlay ? "AIに任せるを停止" : "AIに任せる"}</button>
           <button type="button" className="text-button" onClick={reset}>リセット</button>
         </div>
