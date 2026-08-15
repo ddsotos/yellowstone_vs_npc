@@ -225,8 +225,8 @@ export default function StaticApp() {
   const plannedRefillOptions = plannedRefillState ? refillActions(plannedRefillState) : [];
   const canCompletePendingMove = pendingActions.length > 0 && (!plannedRefillState || Boolean(plannedRefill));
 
-  const compare = async () => {
-    const ownCandidate = completeHumanCandidate(state, pendingActions, history, plannedRefill);
+  const compare = async (refillOverride: RefillAction | null = plannedRefill) => {
+    const ownCandidate = completeHumanCandidate(state, pendingActions, history, refillOverride);
     if (!ownCandidate) return;
     setThinking(true);
     setMessage("AI上位候補を計算しています…");
@@ -250,8 +250,8 @@ export default function StaticApp() {
     }
   };
 
-  const commitCandidate = (evaluation?: TurnEvaluation) => {
-    const candidate = evaluation?.candidate ?? completeHumanCandidate(state, pendingActions, history, plannedRefill);
+  const commitCandidate = (evaluation?: TurnEvaluation, refillOverride: RefillAction | null = plannedRefill) => {
+    const candidate = evaluation?.candidate ?? completeHumanCandidate(state, pendingActions, history, refillOverride);
     if (!candidate) return;
     setTracking(replayV2Actions(state, candidate.actions, tracking).tracking);
     setHistory(candidate.history);
@@ -264,6 +264,16 @@ export default function StaticApp() {
     if (winRateEnabled) void compare();
     else commitCandidate();
   };
+
+  const choosePlannedRefill = (action: RefillAction) => {
+    setPlannedRefill(action);
+  };
+
+  useEffect(() => {
+    if (!plannedRefill || !pendingActions.length || comparison || thinking) return;
+    if (winRateEnabled) void compare(plannedRefill);
+    else commitCandidate(undefined, plannedRefill);
+  }, [plannedRefill]);
 
   const humanRefills = isHumanTurn && state.phase === "refill" ? refillActions(state) : [];
   const previewModel = comparison?.find((model) => model.spec.id === MODEL_ID);

@@ -683,7 +683,26 @@ label {
 }
 
 .comparison-under-hand {
+  width: 100%;
+  min-width: 0;
   margin-top: 1rem;
+}
+
+.comparison-under-hand .comparison-heading {
+  grid-template-columns: 1fr;
+  gap: 0.3rem;
+}
+
+.comparison-under-hand .comparison-heading span {
+  text-align: left;
+  line-height: 1.45;
+}
+
+.comparison-cards-vertical button {
+  min-width: 0;
+  min-height: 4.1rem;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .win-rate-toggle {
@@ -1028,6 +1047,23 @@ footer {
     min-height: 0;
     flex: 1;
     flex-direction: column;
+  }
+
+  .is-comparing .comparison-under-hand {
+    flex: none;
+    overflow: visible;
+  }
+
+  .is-comparing .comparison-cards-vertical {
+    display: flex;
+    flex-direction: column;
+    overflow: visible;
+  }
+
+  .is-comparing .comparison-cards-vertical button {
+    min-height: 3.8rem;
+    grid-template-columns: 5rem 5rem 1fr;
+    align-items: center;
   }
 
   .is-comparing .comparison-heading h2 {
