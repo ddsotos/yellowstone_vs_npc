@@ -22,6 +22,21 @@ function translate(root: Node) {
     const translated = colors[element.textContent?.trim() ?? ""];
     if (translated) element.textContent = translated;
   });
+  document.querySelectorAll(".hand-card > span").forEach((element) => {
+    const colors: Record<string, string> = { "青": "B", "赤": "R", "緑": "G", "黄": "Y" };
+    const translated = colors[element.textContent?.trim() ?? ""];
+    if (translated) element.textContent = translated;
+  });
+  document.querySelectorAll(".comparison").forEach((element) => {
+    const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+    const comparisonNodes: Text[] = [];
+    while (walker.nextNode()) comparisonNodes.push(walker.currentNode as Text);
+    comparisonNodes.forEach((node) => {
+      let nodeValue = node.nodeValue ?? "";
+      [["青", "B"], ["赤", "R"], ["緑", "G"], ["黄", "Y"], ["手番終了", "End turn"], ["山札から補充", "Draw from deck"], ["補充しない", "Draw no cards"], ["マイナスから補充", "Draw from penalties"]].forEach(([from, to]) => { nodeValue = nodeValue.split(from).join(to); });
+      if (nodeValue !== node.nodeValue) node.nodeValue = nodeValue;
+    });
+  });
   document.querySelectorAll(".last-turn").forEach((element) => {
     let value = element.textContent ?? "";
     if (value.includes("直近")) value = value.replace("直近 なし / 受取Penalty 0枚", "No recent action / Penalty received: 0 cards");
