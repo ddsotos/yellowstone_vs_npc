@@ -111,6 +111,7 @@ export default function StaticApp() {
   const [thinking, setThinking] = useState(false);
   const generation = useRef(0);
   const running = useRef(false);
+  const previousAutoPlay = useRef(autoPlay);
 
   const pending = pendingState ?? state;
   const isHumanTurn = !autoPlay && state.currentPlayerIndex === 0 && state.phase !== "game_over";
@@ -216,6 +217,15 @@ export default function StaticApp() {
     };
     void run();
   }, [state, history, tracking, autoPlay, error]);
+
+  useEffect(() => {
+    if (previousAutoPlay.current === autoPlay) return;
+    previousAutoPlay.current = autoPlay;
+    generation.current += 1;
+    running.current = false;
+    setThinking(false);
+    if (!autoPlay) setMessage("AIに任せるを停止しました。");
+  }, [autoPlay]);
 
   const commitPlacement = (action: PlaceCardAction) => {
     const nextPendingState = applyKnownLegalAction(pending, action);
@@ -342,7 +352,7 @@ export default function StaticApp() {
       <section className="score-strip">{state.players.map((player, index) => <article key={index} className={state.currentPlayerIndex === index ? "active-player" : ""}><strong>{index === 0 ? "あなた" : `NPC ${index}`}</strong><span>失点 {player.lossScore}</span><span>手札 {player.hand.length}</span><span>マイナス {player.negativeCards.length}</span><span className="last-turn">{turnSummaryText([...tracking.history].reverse().find((turn) => turn.playerIndex === index))}</span></article>)}</section>
       {message && <p className="notice">{message}</p>}
       {error && <section className="notice model-error"><strong>モデルエラー</strong><p>{error}</p><button type="button" className="primary" onClick={reset}>リセットして再試行</button></section>}
-      {state.phase === "game_over" ? <section className="game-over"><p className="eyebrow">GAME OVER</p><h2>{state.winners.includes(0) ? "あなたの勝利です" : `NPC ${state.winners.join(", ")} の勝利です`}</h2><button type="button" className="primary" onClick={reset}>もう一度遊ぶ</button><button type="button" onClick={reset}>リセット</button></section> : <div className={`game-layout${comparison ? " is-comparing" : ""}`}>
+      {state.phase === "game_over" ? <section className="game-over"><p className="eyebrow">GAME OVER</p><h2>{state.winners.includes(0) ? "あなたの勝利です" : `NPC ${state.winners.join(", ")} の勝利です`}</h2><button type="button" className="primary" onClick={reset}>もう一度遊ぶ</button></section> : <div className={`game-layout${comparison ? " is-comparing" : ""}`}>
         <section className="board-panel"><Board board={shownBoard} legalPositionKeys={comparison || frameChoices.length || !isHumanTurn ? new Set() : legalPositionKeys} frameAnchorKeys={comparison ? new Set() : frameAnchorKeys} penaltyPositionKeys={penaltyPositionKeys} previewActions={shownPlacements} previewFrame={shownFrame} onPositionClick={choosePosition} onFrameAnchorClick={chooseFrameAnchor} /></section>
         <aside className="control-panel">
           {!isHumanTurn && <div className="turn-status"><span className={thinking ? "spinner" : ""} />{autoPlay ? "AIが対局を進行中です" : "CPUの手番です"}</div>}
