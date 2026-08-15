@@ -61,11 +61,21 @@ const handBeforeRefill = (start: GameState, actions: Action[]): typeof start.pla
   return hand;
 };
 
-const planText = (actions: Action[]): string => actions.map((action) => {
-  if (action.type === "place") return `カード${action.handIndex + 1} → (${action.position.x + 1},${action.position.y + 1})`;
+const planText = (start: GameState, actions: Action[]): string => {
+  let current = start;
+  const labels = actions.map((action) => {
+  if (action.type === "place") {
+    const card = current.players[current.currentPlayerIndex].hand[action.handIndex];
+    const colors = { red: "赤", blue: "青", green: "緑", yellow: "黄" } as const;
+    const label = card ? `${colors[card.color]}${card.rankIndex + 1}` : "カード";
+    current = applyKnownLegalAction(current, action);
+    return label;
+  }
   if (action.type === "end_turn") return "手番終了";
   return action.source === "deck" ? "山札から補充" : action.source === "negative_cards" ? "マイナスから補充" : "補充なし";
-}).join(" → ");
+  });
+  return labels.join(" → ");
+};
 
 export default function StaticApp() {
   const [state, setState] = useState<GameState>(() => newGame());
@@ -220,7 +230,10 @@ export default function StaticApp() {
   const plannedRefillState = pending.phase === "refill"
     ? pending
     : pendingActions.length === 1 && legalActions(pending).some((action) => action.type === "end_turn")
-      ? applyKnownLegalAction(pending, { type: "end_turn" })
+      ? (() => {
+          const ended = applyKnownLegalAction(pending, { type: "end_turn" });
+          return ended.phase === "refill" ? ended : null;
+        })()
       : null;
   const plannedRefillOptions = plannedRefillState ? refillActions(plannedRefillState) : [];
   const canCompletePendingMove = pendingActions.length > 0 && (!plannedRefillState || Boolean(plannedRefill));
@@ -311,7 +324,7 @@ export default function StaticApp() {
           {isHumanTurn && humanRefills.length > 0 && <section><h2>手札を補充</h2><p>補充方法を選んでください。</p>{humanRefills.map((action) => <button type="button" key={action.source} onClick={() => applyActualAction(action)}>{action.source === "deck" ? "山札から補充" : action.source === "negative_cards" ? "マイナスカードから補充" : "補充しない"}</button>)}</section>}
           {isHumanTurn && !humanRefills.length && <section><div className="section-title"><h2>あなたの手</h2><span>{pendingActions.length}/2枚</span></div><div className="frame-mode"><span>3×3枠を自動設定</span><button type="button" className={manualFrameSelection ? "selected" : ""} aria-pressed={manualFrameSelection} onClick={() => { setManualFrameSelection((value) => !value); setFrameChoices([]); setSelectedFrameAction(null); }}>{manualFrameSelection ? "OFF" : "ON"}</button></div><Hand cards={shownHand} selectedIndex={selectedHand} disabled={Boolean(comparison) || thinking || frameChoices.length > 0} onSelect={(index) => { setSelectedHand(index); setFrameChoices([]); setSelectedFrameAction(null); }} />
             <div className="frame-mode win-rate-toggle"><span>勝率計算</span><button type="button" className={winRateEnabled ? "selected" : ""} aria-pressed={winRateEnabled} onClick={() => { setWinRateEnabled((value) => !value); setComparison(null); }}>{winRateEnabled ? "ON" : "OFF"}</button></div>
-            {comparison && <section className="comparison comparison-under-hand"><div className="comparison-heading"><h2>AI上位3候補</h2><span>候補を選ぶと盤面と失点表示をプレビューします。</span></div><div className="comparison-cards comparison-cards-vertical"><button type="button" className={preview === "own" ? "selected" : ""} onClick={() => setPreview("own")}><span>あなたの手</span><strong>{previewModel?.own ? `${(previewModel.own.probability * 100).toFixed(1)}%` : "-"}</strong><small>{previewModel?.own && planText(previewModel.own.candidate.actions)}</small></button>{previewModel?.top.slice(0, 3).map((value, index) => <button type="button" key={index} className={preview === `ai-${index}` ? "selected" : ""} onClick={() => setPreview(`ai-${index}` as "ai-0" | "ai-1" | "ai-2")}><span>AI {index + 1}位</span><strong>{(value.probability * 100).toFixed(1)}%</strong><small>{planText(value.candidate.actions)}</small></button>)}</div></section>}
+            {comparison && <section className="comparison comparison-under-hand"><div className="comparison-heading"><h2>AI上位3候補</h2><span>候補を選ぶと盤面と失点表示をプレビューします。</span></div><div className="comparison-cards comparison-cards-vertical"><button type="button" className={preview === "own" ? "selected" : ""} onClick={() => setPreview("own")}><span>あなたの手</span><strong>{previewModel?.own ? `${(previewModel.own.probability * 100).toFixed(1)}%` : "-"}</strong><small>{previewModel?.own && planText(state, previewModel.own.candidate.actions)}</small></button>{previewModel?.top.slice(0, 3).map((value, index) => <button type="button" key={index} className={preview === `ai-${index}` ? "selected" : ""} onClick={() => setPreview(`ai-${index}` as "ai-0" | "ai-1" | "ai-2")}><span>AI {index + 1}位</span><strong>{(value.probability * 100).toFixed(1)}%</strong><small>{planText(state, value.candidate.actions)}</small></button>)}</div></section>}
             {selectedHand !== null && !frameChoices.length && <p className="hint">盤面の置き場所を選んでください。</p>}{frameChoices.length > 0 && <div className="frame-picker"><strong>3×3枠を選択</strong><p>{selectedFrameAction ? `枠外のカード ${penaltyCardCount}枚が失点カードになります。盤面のハイライトを確認してください。` : "盤面上の枠候補を選んでください。"}</p><button type="button" className="primary" onClick={() => selectedFrameAction && commitPlacement(selectedFrameAction)} disabled={!selectedFrameAction}>OK</button></div>}{plannedRefillOptions.length > 0 && pendingActions.length > 0 && <section className="planned-refill"><h2>補充方法</h2>{plannedRefillOptions.map((action) => <button type="button" key={action.source} className={plannedRefill?.source === action.source ? "selected" : ""} onClick={() => setPlannedRefill(action)}>{action.source === "deck" ? "山札から補充" : action.source === "negative_cards" ? "マイナスから補充" : "補充しない"}</button>)}</section>}{canCompletePendingMove && !comparison && <button type="button" className="primary" onClick={completeMove} disabled={thinking}>{pendingActions.length === 1 ? "1枚で手番を終了" : "この2枚でプレイ"}</button>}{comparison && previewModel?.own && <button type="button" className="primary" onClick={() => commitCandidate(preview === "own" ? previewModel.own : previewModel.top[Number(preview.slice(3))])}>表示中の手でプレイ</button>}{pendingActions.length > 0 && <button type="button" onClick={resetTurnUi}>自分の手を選び直す</button>}</section>}
         </aside>
       </div>}
