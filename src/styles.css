@@ -1445,6 +1445,15 @@ footer {
   line-height: 1.5;
 }
 
+.tutorial-figures {
+  display: grid;
+  gap: 1rem;
+}
+
+.tutorial-figures .tutorial-figure img {
+  max-height: 22rem;
+}
+
 .tutorial-note {
   display: flex;
   gap: 0.8rem;
