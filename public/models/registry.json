@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "models": [{
+    "id": "card-information-gated-branch-350k-public-epoch002-pct100",
+    "label": "Card information gated branch 350k public epoch002 pct100",
+    "modelPath": "models/card-information-gated-branch-350k-public-epoch002-pct100.onnx",
+    "valueSchema": "yellowstone.value.card_information.v1",
+    "inputCanonicalization": "fast_lr_ud_color_v1_card_information_branch",
+    "historySemantics": "none",
+    "boardChannels": 1,
+    "boardHeight": 7,
+    "boardWidth": 3,
+    "contextSize": 146,
+    "scoreKind": "probability",
+    "outputTransform": "sigmoid",
+    "candidateGrouping": "played_cards"
+  }]
+}
