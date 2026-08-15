@@ -17,6 +17,18 @@ function translate(root: Node) {
     replacements.slice().sort((left, right) => right[0].length - left[0].length).forEach(([from, to]) => { value = value.split(from).join(to); });
     if (value !== node.nodeValue) node.nodeValue = value;
   });
+  document.querySelectorAll(".card-color").forEach((element) => {
+    const colors: Record<string, string> = { "青": "Blue", "赤": "Red", "緑": "Green", "黄": "Yellow" };
+    const translated = colors[element.textContent?.trim() ?? ""];
+    if (translated) element.textContent = translated;
+  });
+  document.querySelectorAll(".last-turn").forEach((element) => {
+    let value = element.textContent ?? "";
+    if (value.includes("直近")) value = value.replace("直近 なし / 受取Penalty 0枚", "No recent action / Penalty received: 0 cards");
+    value = value.replace("直近 ", "Recent: ").replaceAll("青", "Blue").replaceAll("赤", "Red").replaceAll("緑", "Green").replaceAll("黄", "Yellow").replaceAll("・", ", ").replace(" / 受取Penalty ", " / Penalty received: ").replaceAll("枚", " cards");
+    value = value.replace(/Penalty received: (\d+) cards/, (_match, count: string) => `Penalty received: ${count} ${count === "1" ? "card" : "cards"}`);
+    if (value !== element.textContent) element.textContent = value;
+  });
 }
 
 export default function EnglishApp() {
