@@ -40,6 +40,7 @@ import {
 } from "./game/v2Tracking";
 import { MODEL_ID, MODEL_LABEL, verifyModelContract } from "./modelContract";
 import Tutorial from "./Tutorial";
+import EnglishTutorial from "./EnglishTutorial";
 
 const newGame = (): GameState => {
   const state = createInitialState(4);
@@ -351,7 +352,7 @@ export default function StaticApp() {
   const penaltyCardCount = [...penaltyPositionKeys].reduce((total, key) => total + (placementPreviewBoard[key]?.length ?? 0), 0);
   const shownHand = shownEvaluation ? handBeforeRefill(state, shownEvaluation.candidate.actions) : pending.players[0].hand;
 
-  if (screen === "tutorial") return <Tutorial onBack={() => setScreen("game")} />;
+  if (screen === "tutorial") return {en: <EnglishTutorial onBack={() => setScreen("game")} />, ja: <Tutorial onBack={() => setScreen("game")} />}[new URLSearchParams(window.location.search).get("lang") === "en" ? "en" : "ja"];
 
   return (
     <main className={`game-page${comparison ? " is-comparing-page" : ""}`}>
