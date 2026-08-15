@@ -676,6 +676,20 @@ label {
   gap: 0.65rem;
 }
 
+.comparison-cards-vertical {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.comparison-under-hand {
+  margin-top: 1rem;
+}
+
+.win-rate-toggle {
+  margin-top: 0.8rem;
+}
+
 .candidate-effects {
   display: inline-flex;
   gap: 0.35rem;
