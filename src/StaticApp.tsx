@@ -1,153 +1,310 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AiTimeoutError, selectBestTurn, warmAi } from "./ai/client";
+import {
+  AiTimeoutError,
+  evaluateAllModels,
+  ModelAnalysis,
+  selectBestTurn,
+  warmAi,
+} from "./ai/client";
 import { Board } from "./components/Board";
 import { Hand } from "./components/Hand";
 import {
-  createInitialState, framesContaining, legalActions,
-  legalPositionsForCard, refillActions,
+  applyKnownLegalAction,
+  createInitialState,
+  framePositions,
+  legalActions,
+  refillActions,
 } from "./game/game";
-import { chooseHeuristicAction } from "./game/bot";
+import { chooseHeuristicAction, placementSortKey } from "./game/bot";
 import {
-  Action, GameState, PlaceCardAction, RecentPlacement, positionKey,
+  Action,
+  GameState,
+  PlaceCardAction,
+  RecentPlacement,
+  RefillAction,
+  positionKey,
 } from "./game/types";
 import {
-  applyActionTrackingHistory, enumerateTurnCandidates, TurnEvaluation,
+  applyActionTrackingHistory,
+  completeHumanCandidate,
+  enumerateTurnCandidates,
+  TurnEvaluation,
 } from "./game/value";
-import { createV2Tracking, observeV2Action, replayV2Actions, V2TrackingState } from "./game/v2Tracking";
+import {
+  createV2Tracking,
+  observeV2Action,
+  replayV2Actions,
+  V2TrackingState,
+} from "./game/v2Tracking";
 import { MODEL_ID, MODEL_LABEL, verifyModelContract } from "./modelContract";
-import { placementSortKey } from "./game/bot";
 
 const newGame = (): GameState => {
   const state = createInitialState(4);
   return { ...state, currentPlayerIndex: state.randomState % 4 };
 };
 
-const applyTracked = (state: GameState, action: Action, history: RecentPlacement[], tracking: V2TrackingState) => {
-  const applied = applyActionTrackingHistory(state, action, history);
-  return { state: applied.state, history: applied.history, tracking: observeV2Action(tracking, state, action, applied.state) };
+const comparePlacement = (state: GameState, left: PlaceCardAction, right: PlaceCardAction): number => {
+  const a = placementSortKey(state, left);
+  const b = placementSortKey(state, right);
+  for (let index = 0; index < Math.max(a.length, b.length); index += 1) {
+    const difference = (a[index] ?? 0) - (b[index] ?? 0);
+    if (difference) return difference;
+  }
+  return 0;
 };
+
+const handBeforeRefill = (start: GameState, actions: Action[]): typeof start.players[number]["hand"] => {
+  const hand = [...start.players[start.currentPlayerIndex].hand];
+  actions.forEach((action) => {
+    if (action.type === "place") hand.splice(action.handIndex, 1);
+  });
+  return hand;
+};
+
+const planText = (actions: Action[]): string => actions.map((action) => {
+  if (action.type === "place") return `カード${action.handIndex + 1} → (${action.position.x + 1},${action.position.y + 1})`;
+  if (action.type === "end_turn") return "手番終了";
+  return action.source === "deck" ? "山札から補充" : action.source === "negative_cards" ? "マイナスから補充" : "補充なし";
+}).join(" → ");
 
 export default function StaticApp() {
   const [state, setState] = useState<GameState>(() => newGame());
   const [history, setHistory] = useState<RecentPlacement[]>([]);
   const [tracking, setTracking] = useState<V2TrackingState>(() => createV2Tracking(4));
+  const [pendingState, setPendingState] = useState<GameState | null>(null);
+  const [pendingActions, setPendingActions] = useState<PlaceCardAction[]>([]);
   const [selectedHand, setSelectedHand] = useState<number | null>(null);
   const [frameChoices, setFrameChoices] = useState<PlaceCardAction[]>([]);
-  const [selectedFrame, setSelectedFrame] = useState<PlaceCardAction | null>(null);
+  const [selectedFrameAction, setSelectedFrameAction] = useState<PlaceCardAction | null>(null);
+  const [plannedRefill, setPlannedRefill] = useState<RefillAction | null>(null);
+  const [comparison, setComparison] = useState<ModelAnalysis[] | null>(null);
+  const [preview, setPreview] = useState<"own" | "ai-0" | "ai-1" | "ai-2">("own");
   const [autoPlay, setAutoPlay] = useState(false);
-  const [autoFrame, setAutoFrame] = useState(true);
-  const [showWinRate, setShowWinRate] = useState(true);
-  const [winRate, setWinRate] = useState<{ status: "loading" | "ok" | "error"; value?: number; error?: string }>({ status: "loading" });
+  const [manualFrameSelection, setManualFrameSelection] = useState(false);
+  const [winRateEnabled, setWinRateEnabled] = useState(true);
   const [message, setMessage] = useState("読み込み中…");
   const [error, setError] = useState<string | null>(null);
   const [thinking, setThinking] = useState(false);
   const generation = useRef(0);
   const running = useRef(false);
-  const humanTurn = state.currentPlayerIndex === 0 && !autoPlay && state.phase !== "game_over";
 
-  const resetUi = useCallback(() => { setSelectedHand(null); setFrameChoices([]); setSelectedFrame(null); }, []);
+  const pending = pendingState ?? state;
+  const isHumanTurn = !autoPlay && state.currentPlayerIndex === 0 && state.phase !== "game_over";
+  const human = state.players[0];
+  const selectedActions = selectedHand === null ? [] : legalActions(pending).filter(
+    (action): action is PlaceCardAction => action.type === "place" && action.handIndex === selectedHand,
+  );
+  const legalPositionKeys = new Set(selectedActions.map((action) => positionKey(action.position)));
+  const frameAnchorKeys = new Set(frameChoices.map((action) => positionKey({ x: action.frame.x + 2, y: action.frame.y + 2 })));
+
+  const resetTurnUi = useCallback(() => {
+    setPendingState(null);
+    setPendingActions([]);
+    setSelectedHand(null);
+    setFrameChoices([]);
+    setSelectedFrameAction(null);
+    setPlannedRefill(null);
+    setComparison(null);
+    setPreview("own");
+  }, []);
+
   const reset = useCallback(() => {
-    generation.current += 1; running.current = false; setThinking(false); setError(null);
-    const next = newGame(); setState(next); setHistory([]); setTracking(createV2Tracking(4)); resetUi();
+    generation.current += 1;
+    running.current = false;
+    setThinking(false);
+    setError(null);
+    const next = newGame();
+    setState(next);
+    setHistory([]);
+    setTracking(createV2Tracking(4));
+    resetTurnUi();
     setMessage("新しいゲームを開始しました。");
-  }, [resetUi]);
+  }, [resetTurnUi]);
 
   useEffect(() => {
-    try { verifyModelContract(); warmAi(MODEL_ID); setMessage("ゲーム開始"); }
-    catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
+    try {
+      verifyModelContract();
+      warmAi(MODEL_ID);
+      setMessage("");
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
   }, []);
 
   useEffect(() => {
-    if (humanTurn || state.phase === "game_over" || running.current || error) return;
+    if (state.phase === "game_over" || running.current || error || (!autoPlay && state.currentPlayerIndex === 0)) return;
     running.current = true;
     const token = generation.current;
-    const initial = state;
-    const controlsAllPlayers = autoPlay;
-    let nextState = state; let nextHistory = history; let nextTracking = tracking;
-    setThinking(true); setMessage(`NPC ${state.currentPlayerIndex} が考えています…`);
+    let nextState = state;
+    let nextHistory = history;
+    let nextTracking = tracking;
+    setThinking(true);
+    setMessage(autoPlay ? "AIが対局を進行中です…" : `NPC ${state.currentPlayerIndex} が考えています…`);
     const run = async () => {
       try {
-        while (token === generation.current && nextState.phase !== "game_over" && (controlsAllPlayers || nextState.currentPlayerIndex !== 0)) {
+        while (
+          token === generation.current &&
+          nextState.phase !== "game_over" &&
+          (autoPlay || nextState.currentPlayerIndex !== 0)
+        ) {
           const player = nextState.currentPlayerIndex;
-          if (nextState.phase === "play" && nextState.cardsPlayedThisTurn === 0 && legalActions(nextState).some((a) => a.type === "place")) {
+          if (nextState.phase === "play" && nextState.cardsPlayedThisTurn === 0 && legalActions(nextState).some((action) => action.type === "place")) {
             const candidates = enumerateTurnCandidates(nextState, nextHistory);
-            const best: TurnEvaluation = await selectBestTurn(candidates, player, nextState, nextTracking, nextHistory, MODEL_ID);
-            const replayed = replayV2Actions(nextState, best.candidate.actions, nextTracking);
-            nextState = best.candidate.state; nextHistory = best.candidate.history; nextTracking = replayed.tracking;
+            const best = await selectBestTurn(candidates, player, nextState, nextTracking, nextHistory, MODEL_ID);
+            nextTracking = replayV2Actions(nextState, best.candidate.actions, nextTracking).tracking;
+            nextState = best.candidate.state;
+            nextHistory = best.candidate.history;
           } else {
             const action = chooseHeuristicAction(nextState);
             if (!action) throw new Error("CPUが合法手を選べませんでした。");
-            const applied = applyTracked(nextState, action, nextHistory, nextTracking);
-            nextState = applied.state; nextHistory = applied.history; nextTracking = applied.tracking;
+            const applied = applyActionTrackingHistory(nextState, action, nextHistory);
+            nextTracking = observeV2Action(nextTracking, nextState, action, applied.state);
+            nextState = applied.state;
+            nextHistory = applied.history;
           }
         }
         if (token !== generation.current) return;
-        setState(nextState); setHistory(nextHistory); setTracking(nextTracking); setMessage("");
+        setState(nextState);
+        setHistory(nextHistory);
+        setTracking(nextTracking);
+        setMessage("");
       } catch (cause) {
         if (token !== generation.current) return;
-        setError(cause instanceof AiTimeoutError ? "AI推論がタイムアウトしました。もう一度リセットしてください。" : `AI推論に失敗しました: ${cause instanceof Error ? cause.message : String(cause)}`);
-        setState(initial);
-      } finally { if (token === generation.current) { running.current = false; setThinking(false); } }
+        setError(cause instanceof AiTimeoutError ? "AI推論がタイムアウトしました。" : `AI推論に失敗しました: ${cause instanceof Error ? cause.message : String(cause)}`);
+      } finally {
+        if (token === generation.current) {
+          running.current = false;
+          setThinking(false);
+        }
+      }
     };
     void run();
-  }, [state, history, tracking, humanTurn, error, autoPlay]);
+  }, [state, history, tracking, autoPlay, error]);
 
-  useEffect(() => {
-    if (!showWinRate || autoPlay || state.phase !== "play" || state.currentPlayerIndex !== 0 || state.cardsPlayedThisTurn !== 0 || error) {
-      setWinRate({ status: "loading" });
-      return;
-    }
-    let cancelled = false;
-    setWinRate({ status: "loading" });
-    const calculate = async () => {
-      try {
-        const candidates = enumerateTurnCandidates(state, history);
-        const best = await selectBestTurn(candidates, 0, state, tracking, history, MODEL_ID);
-        if (!cancelled) setWinRate({ status: "ok", value: best.probability });
-      } catch (cause) {
-        if (!cancelled) setWinRate({ status: "error", error: cause instanceof Error ? cause.message : String(cause) });
-      }
-    };
-    void calculate();
-    return () => { cancelled = true; };
-  }, [showWinRate, autoPlay, state, history, tracking, error]);
-
-  const human = state.players[0];
-  const selectedCard = selectedHand === null ? null : human.hand[selectedHand];
-  const selectedActions = useMemo(() => selectedHand === null ? [] : legalActions(state).filter((action): action is PlaceCardAction => action.type === "place" && action.handIndex === selectedHand), [state, selectedHand]);
-  const legalPositionKeys = useMemo(() => new Set(selectedActions.map((action) => positionKey(action.position))), [selectedActions]);
-  const frameAnchorKeys = useMemo(() => {
-    return new Set(frameChoices.map((action) => positionKey({ x: action.frame.x + 2, y: action.frame.y + 2 })));
-  }, [frameChoices]);
+  const commitPlacement = (action: PlaceCardAction) => {
+    const nextPendingState = applyKnownLegalAction(pending, action);
+    setPendingState(nextPendingState);
+    setPendingActions((actions) => [...actions, action]);
+    setSelectedHand(null);
+    setFrameChoices([]);
+    setSelectedFrameAction(null);
+    setPlannedRefill(null);
+    setComparison(null);
+  };
 
   const choosePosition = (x: number, y: number) => {
-    if (selectedHand === null) return;
     const choices = selectedActions.filter((action) => action.position.x === x && action.position.y === y);
-    if (!choices.length) return;
-    const best = [...choices].sort((a, b) => {
-      const left = placementSortKey(state, a); const right = placementSortKey(state, b);
-      for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
-        const difference = (left[index] ?? 0) - (right[index] ?? 0);
-        if (difference) return difference;
-      }
-      return 0;
-    })[0];
-    if (autoFrame) { commitAction(best); return; }
-    setFrameChoices(choices); setSelectedFrame(best);
+    const best = [...choices].sort((left, right) => comparePlacement(pending, left, right))[0];
+    if (!best) return;
+    if (!manualFrameSelection) {
+      commitPlacement(best);
+      return;
+    }
+    setFrameChoices(choices);
+    setSelectedFrameAction(best);
   };
-  const chooseFrame = (x: number, y: number) => {
-    const action = frameChoices.find((choice) => choice.frame.x + 2 === x && choice.frame.y + 2 === y);
-    if (action) setSelectedFrame(action);
-  };
-  const commitAction = (action: Action) => { const applied = applyTracked(state, action, history, tracking); setState(applied.state); setHistory(applied.history); setTracking(applied.tracking); resetUi(); };
-  const act = (action: Action) => commitAction(action);
-  const endTurn = () => { if (legalActions(state).some((a) => a.type === "end_turn")) act({ type: "end_turn" }); };
-  const refill = (source: "deck" | "negative_cards" | "none") => { if (refillActions(state).some((a) => a.source === source)) act({ type: "refill", source }); };
 
-  return <main className="game-page">
-    <header className="game-header"><div><p className="eyebrow">4 PLAYER GAME</p><h1>Yellowstone park</h1></div><div className="header-actions"><span>CPU 3体</span><span>{MODEL_LABEL}</span><button type="button" className="text-button" onClick={() => setAutoPlay((value) => !value)}>{autoPlay ? "AIに任せるを停止" : "AIに任せる"}</button><button type="button" className="text-button" onClick={reset}>リセット</button></div></header>
-    <section className="score-strip">{state.players.map((player, index) => <article key={index} className={state.currentPlayerIndex === index ? "active-player" : ""}><strong>{index === 0 ? "あなた" : `NPC ${index}`}</strong><span>失点 {player.lossScore}</span><span>手札 {player.hand.length}</span><span>マイナス {player.negativeCards.length}</span></article>)}</section>
-    {message && <p className="notice">{message}</p>}{error && <section className="notice model-error"><strong>モデルエラー</strong><p>{error}</p><button type="button" className="primary" onClick={reset}>リセットして再試行</button></section>}
-    {state.phase === "game_over" ? <section className="game-over"><p className="eyebrow">GAME OVER</p><h2>{state.winners.includes(0) ? "あなたの勝利です" : `NPC ${state.winners.join(", ")} の勝利です`}</h2><button type="button" className="primary" onClick={reset}>もう一度遊ぶ</button><button type="button" onClick={reset}>リセット</button></section> : <div className="game-layout"><section className="board-panel"><Board board={state.board} legalPositionKeys={humanTurn && !frameChoices.length ? legalPositionKeys : new Set()} frameAnchorKeys={humanTurn && frameChoices.length ? frameAnchorKeys : new Set()} onPositionClick={choosePosition} onFrameAnchorClick={chooseFrame} /></section><aside className="control-panel"><section><div className="section-title"><h2>あなたの手札</h2><span>{human.hand.length}枚</span></div><div className="frame-mode"><span>3×3枠自動設定</span><button type="button" className={autoFrame ? "selected" : ""} aria-pressed={autoFrame} onClick={() => { setAutoFrame((value) => !value); setFrameChoices([]); setSelectedFrame(null); }}>{autoFrame ? "ON" : "OFF"}</button></div><Hand cards={human.hand} selectedIndex={humanTurn ? selectedHand : null} disabled={!humanTurn || frameChoices.length > 0} onSelect={(index) => { setSelectedHand(index); setFrameChoices([]); setSelectedFrame(null); }} /></section>{humanTurn && <section className="setup-card"><div className="frame-mode"><span>勝率計算</span><button type="button" className={showWinRate ? "selected" : ""} aria-pressed={showWinRate} onClick={() => setShowWinRate((value) => !value)}>{showWinRate ? "ON" : "OFF"}</button></div>{showWinRate && <p>{winRate.status === "loading" ? "計算中…" : winRate.status === "ok" ? `現在の最善候補: ${(winRate.value! * 100).toFixed(1)}%` : `計算エラー: ${winRate.error}`}</p>}</section>}{humanTurn && frameChoices.length > 0 && <section className="frame-picker"><p>3×3枠を選択してください。</p><button type="button" className="primary" disabled={!selectedFrame} onClick={() => selectedFrame && commitAction(selectedFrame)}>OK</button></section>}{humanTurn && state.cardsPlayedThisTurn === 1 && !frameChoices.length && <button type="button" className="primary" onClick={endTurn}>1枚で手番終了</button>}{humanTurn && state.phase === "refill" && refillActions(state).map((action) => <button type="button" key={action.source} onClick={() => refill(action.source)}>補充: {action.source === "deck" ? "山札" : action.source === "negative_cards" ? "マイナスカード" : "なし"}</button>)}{!humanTurn && <div className="turn-status"><span className={thinking ? "spinner" : ""} />{autoPlay ? "AIが対局を進行中です" : "CPUの手番です"}</div>}</aside></div>}
-  </main>;
+  const chooseFrameAnchor = (x: number, y: number) => {
+    const action = frameChoices.find((choice) => choice.frame.x + 2 === x && choice.frame.y + 2 === y);
+    if (action) setSelectedFrameAction(action);
+  };
+
+  const applyActualAction = (action: Action) => {
+    const applied = applyActionTrackingHistory(state, action, history);
+    setState(applied.state);
+    setHistory(applied.history);
+    setTracking(observeV2Action(tracking, state, action, applied.state));
+    resetTurnUi();
+  };
+
+  const plannedRefillState = pending.phase === "refill"
+    ? pending
+    : pendingActions.length === 1 && legalActions(pending).some((action) => action.type === "end_turn")
+      ? applyKnownLegalAction(pending, { type: "end_turn" })
+      : null;
+  const plannedRefillOptions = plannedRefillState ? refillActions(plannedRefillState) : [];
+  const canCompletePendingMove = pendingActions.length > 0 && (!plannedRefillState || Boolean(plannedRefill));
+
+  const compare = async () => {
+    const ownCandidate = completeHumanCandidate(state, pendingActions, history, plannedRefill);
+    if (!ownCandidate) return;
+    setThinking(true);
+    setMessage("AI上位候補を計算しています…");
+    try {
+      const models = await evaluateAllModels(
+        enumerateTurnCandidates(state, history),
+        ownCandidate,
+        0,
+        state,
+        tracking,
+        history,
+        [MODEL_ID],
+      );
+      setComparison(models);
+      setPreview("own");
+      setMessage("");
+    } catch (cause) {
+      setMessage(`勝率計算に失敗しました: ${cause instanceof Error ? cause.message : String(cause)}`);
+    } finally {
+      setThinking(false);
+    }
+  };
+
+  const commitCandidate = (evaluation?: TurnEvaluation) => {
+    const candidate = evaluation?.candidate ?? completeHumanCandidate(state, pendingActions, history, plannedRefill);
+    if (!candidate) return;
+    setTracking(replayV2Actions(state, candidate.actions, tracking).tracking);
+    setHistory(candidate.history);
+    setState(candidate.state);
+    resetTurnUi();
+  };
+
+  const completeMove = () => {
+    if (!canCompletePendingMove) return;
+    if (winRateEnabled) void compare();
+    else commitCandidate();
+  };
+
+  const humanRefills = isHumanTurn && state.phase === "refill" ? refillActions(state) : [];
+  const previewModel = comparison?.find((model) => model.spec.id === MODEL_ID);
+  const shownEvaluation = preview === "own" ? previewModel?.own : previewModel?.top[Number(preview.slice(3))];
+  const placementPreviewBoard = selectedFrameAction
+    ? { ...pending.board, [positionKey(selectedFrameAction.position)]: [...(pending.board[positionKey(selectedFrameAction.position)] ?? []), pending.players[pending.currentPlayerIndex].hand[selectedFrameAction.handIndex]] }
+    : pending.board;
+  const shownBoard = shownEvaluation?.candidate.state.board ?? placementPreviewBoard;
+  const shownPlacements = (shownEvaluation?.candidate.actions ?? (selectedFrameAction ? [...pendingActions, selectedFrameAction] : pendingActions)).filter((action): action is PlaceCardAction => action.type === "place");
+  const shownFrame = selectedFrameAction?.frame ?? shownPlacements.at(-1)?.frame;
+  const penaltyPositionKeys = selectedFrameAction
+    ? new Set(Object.keys(placementPreviewBoard).filter((key) => !framePositions(selectedFrameAction.frame).map(positionKey).includes(key)))
+    : new Set<string>();
+  const penaltyCardCount = [...penaltyPositionKeys].reduce((total, key) => total + (placementPreviewBoard[key]?.length ?? 0), 0);
+  const shownHand = shownEvaluation ? handBeforeRefill(state, shownEvaluation.candidate.actions) : pending.players[0].hand;
+
+  return (
+    <main className={`game-page${comparison ? " is-comparing-page" : ""}`}>
+      <header className="game-header">
+        <div><p className="eyebrow">4 PLAYER GAME</p><h1>Yellowstone park</h1></div>
+        <div className="header-actions">
+          <span>CPU 3体</span><span>{MODEL_LABEL}</span>
+          <button type="button" className="text-button" onClick={() => setWinRateEnabled((value) => !value)}>{winRateEnabled ? "勝率計算 ON" : "勝率計算 OFF"}</button>
+          <button type="button" className="text-button" onClick={() => setAutoPlay((value) => !value)}>{autoPlay ? "AIに任せるを停止" : "AIに任せる"}</button>
+          <button type="button" className="text-button" onClick={reset}>リセット</button>
+        </div>
+      </header>
+      <section className="score-strip">{state.players.map((player, index) => <article key={index} className={state.currentPlayerIndex === index ? "active-player" : ""}><strong>{index === 0 ? "あなた" : `NPC ${index}`}</strong><span>失点 {player.lossScore}</span><span>手札 {player.hand.length}</span><span>マイナス {player.negativeCards.length}</span></article>)}</section>
+      {message && <p className="notice">{message}</p>}
+      {error && <section className="notice model-error"><strong>モデルエラー</strong><p>{error}</p><button type="button" className="primary" onClick={reset}>リセットして再試行</button></section>}
+      {comparison && <section className="comparison"><div className="comparison-heading"><h2>AI上位3候補</h2><span>候補を選ぶと盤面と失点表示をプレビューします。</span></div><div className="comparison-cards"><button type="button" className={preview === "own" ? "selected" : ""} onClick={() => setPreview("own")}><span>あなたの手</span><strong>{previewModel?.own ? `${(previewModel.own.probability * 100).toFixed(1)}%` : "-"}</strong><small>{previewModel?.own && planText(previewModel.own.candidate.actions)}</small></button>{previewModel?.top.slice(0, 3).map((value, index) => <button type="button" key={index} className={preview === `ai-${index}` ? "selected" : ""} onClick={() => setPreview(`ai-${index}` as "ai-0" | "ai-1" | "ai-2")}><span>AI {index + 1}位</span><strong>{(value.probability * 100).toFixed(1)}%</strong><small>{planText(value.candidate.actions)}</small></button>)}</div></section>}
+      {state.phase === "game_over" ? <section className="game-over"><p className="eyebrow">GAME OVER</p><h2>{state.winners.includes(0) ? "あなたの勝利です" : `NPC ${state.winners.join(", ")} の勝利です`}</h2><button type="button" className="primary" onClick={reset}>もう一度遊ぶ</button><button type="button" onClick={reset}>リセット</button></section> : <div className={`game-layout${comparison ? " is-comparing" : ""}`}>
+        <section className="board-panel"><Board board={shownBoard} legalPositionKeys={comparison || frameChoices.length || !isHumanTurn ? new Set() : legalPositionKeys} frameAnchorKeys={comparison ? new Set() : frameAnchorKeys} penaltyPositionKeys={penaltyPositionKeys} previewActions={shownPlacements} previewFrame={shownFrame} onPositionClick={choosePosition} onFrameAnchorClick={chooseFrameAnchor} /></section>
+        <aside className="control-panel">
+          {!isHumanTurn && <div className="turn-status"><span className={thinking ? "spinner" : ""} />{autoPlay ? "AIが対局を進行中です" : "CPUの手番です"}</div>}
+          {!isHumanTurn && <section><div className="section-title"><h2>あなたの手札</h2><span>{human.hand.length}枚</span></div><Hand cards={human.hand} selectedIndex={null} disabled onSelect={() => undefined} /></section>}
+          {isHumanTurn && humanRefills.length > 0 && <section><h2>手札を補充</h2><p>補充方法を選んでください。</p>{humanRefills.map((action) => <button type="button" key={action.source} onClick={() => applyActualAction(action)}>{action.source === "deck" ? "山札から補充" : action.source === "negative_cards" ? "マイナスカードから補充" : "補充しない"}</button>)}</section>}
+          {isHumanTurn && !humanRefills.length && <section><div className="section-title"><h2>あなたの手</h2><span>{pendingActions.length}/2枚</span></div><div className="frame-mode"><span>3×3枠を自動設定</span><button type="button" className={manualFrameSelection ? "selected" : ""} aria-pressed={manualFrameSelection} onClick={() => { setManualFrameSelection((value) => !value); setFrameChoices([]); setSelectedFrameAction(null); }}>{manualFrameSelection ? "OFF" : "ON"}</button></div><Hand cards={shownHand} selectedIndex={selectedHand} disabled={Boolean(comparison) || thinking || frameChoices.length > 0} onSelect={(index) => { setSelectedHand(index); setFrameChoices([]); setSelectedFrameAction(null); }} />{selectedHand !== null && !frameChoices.length && <p className="hint">盤面の置き場所を選んでください。</p>}{frameChoices.length > 0 && <div className="frame-picker"><strong>3×3枠を選択</strong><p>{selectedFrameAction ? `枠外のカード ${penaltyCardCount}枚が失点カードになります。盤面のハイライトを確認してください。` : "盤面上の枠候補を選んでください。"}</p><button type="button" className="primary" onClick={() => selectedFrameAction && commitPlacement(selectedFrameAction)} disabled={!selectedFrameAction}>OK</button></div>}{plannedRefillOptions.length > 0 && pendingActions.length > 0 && <section className="planned-refill"><h2>補充方法</h2>{plannedRefillOptions.map((action) => <button type="button" key={action.source} className={plannedRefill?.source === action.source ? "selected" : ""} onClick={() => setPlannedRefill(action)}>{action.source === "deck" ? "山札から補充" : action.source === "negative_cards" ? "マイナスから補充" : "補充しない"}</button>)}</section>}{canCompletePendingMove && !comparison && <button type="button" className="primary" onClick={completeMove} disabled={thinking}>{pendingActions.length === 1 ? "1枚で手番を終了" : "この2枚でプレイ"}</button>}{comparison && previewModel?.own && <button type="button" className="primary" onClick={() => commitCandidate(preview === "own" ? previewModel.own : previewModel.top[Number(preview.slice(3))])}>表示中の手でプレイ</button>}{pendingActions.length > 0 && <button type="button" onClick={resetTurnUi}>自分の手を選び直す</button>}</section>}
+        </aside>
+      </div>}
+      <footer>山札 {state.deck.length}枚・決算 {state.settlementCount}回</footer>
+    </main>
+  );
 }
